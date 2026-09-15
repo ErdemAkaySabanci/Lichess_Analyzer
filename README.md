@@ -94,7 +94,17 @@ Then open the local URL Streamlit prints (defaults to `http://localhost:8501`).
 
 ## Live Demo / Screenshots
 
-Not deployed yet (would need a Streamlit Community Cloud link here). Screenshots from a local run:
+**Live demo:** _add your Streamlit Community Cloud URL here after deploying (see below)._
+
+Screenshots from a local run:
 
 ![Dashboard overview](dashboard/screenshots/overview.png)
 ![Elo range, hour-of-day and opening charts](dashboard/screenshots/charts.png)
+
+### Deploying the dashboard (Streamlit Community Cloud, free)
+
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with your GitHub account.
+2. Click **New app** → select the `Lichess_Analyzer` repo, branch `main`.
+3. Set **Main file path** to `dashboard/app.py`.
+4. Deploy. Streamlit Cloud automatically picks up [`dashboard/requirements.txt`](dashboard/requirements.txt) (a lean dependency list scoped to just the dashboard) instead of the full project `requirements.txt`.
+5. Once live, copy the app URL back into this README's "Live demo" line above.
