@@ -94,7 +94,8 @@ Then open the local URL Streamlit prints (defaults to `http://localhost:8501`).
 
 ## Live Demo / Screenshots
 
-**Live demo:** _add your Streamlit Community Cloud URL here after deploying (see below)._
+**Live demo:** [lichessanalyzer-kunhdct4haer6ezadhndcf.streamlit.app](https://lichessanalyzer-kunhdct4haer6ezadhndcf.streamlit.app/)
+_(free-tier hosting — first load after idle can take ~15-20s to wake up)_
 
 Screenshots from a local run:
 
