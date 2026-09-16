@@ -15,6 +15,20 @@ DB_PATH = Path(__file__).resolve().parent.parent / "sql" / "lichess.db"
 
 RATED_MODES = ["Rated bullet game", "Rated blitz game", "Rated classical game"]
 
+NICKNAME = "legend2014"
+
+# Coarser bands than winrate_by_elo_range: the colour comparison splits each band
+# in two, so 10 bands would leave several pairs with single-digit sample sizes.
+ELO_BAND_CASE = """
+    CASE
+        WHEN OpponentElo < 2400 THEN '<2400'
+        WHEN OpponentElo < 2600 THEN '2400-2599'
+        WHEN OpponentElo < 2800 THEN '2600-2799'
+        WHEN OpponentElo < 3000 THEN '2800-2999'
+        ELSE '3000+'
+    END
+"""
+
 
 def get_connection() -> sqlite3.Connection:
     return sqlite3.connect(DB_PATH)
@@ -53,7 +67,7 @@ def get_opening_options(conn: sqlite3.Connection, min_games: int = 10) -> list[s
     return df["Opening"].tolist()
 
 
-def summary_metrics(conn, modes, openings, date_from, date_to) -> dict:
+def summary_metrics(conn, modes, openings, date_from, date_to, min_opening_games: int = 50) -> dict:
     where, params = _where_clause(modes, openings, date_from, date_to)
     query = f"""
         SELECT
@@ -71,11 +85,11 @@ def summary_metrics(conn, modes, openings, date_from, date_to) -> dict:
         FROM games
         WHERE {where}
         GROUP BY Opening
-        HAVING COUNT(*) >= 10
+        HAVING COUNT(*) >= ?
         ORDER BY win_rate DESC
         LIMIT 1
     """
-    best = conn.execute(best_opening_query, params).fetchone()
+    best = conn.execute(best_opening_query, [*params, min_opening_games]).fetchone()
 
     return {
         "total_games": total_games or 0,
@@ -174,6 +188,143 @@ def winrate_by_color(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
         ORDER BY PlayerColor DESC
     """
     return pd.read_sql_query(query, conn, params=params)
+
+
+def daily_activity(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
+    """One row per day that had at least one game (days with none are absent)."""
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT Date, COUNT(*) AS games_played
+        FROM games
+        WHERE {where}
+        GROUP BY Date
+        ORDER BY Date
+    """
+    return pd.read_sql_query(query, conn, params=params)
+
+
+def elo_trajectory(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
+    """End-of-day rating per mode.
+
+    Bullet/blitz/classical are separate Lichess rating pools, so each mode is
+    queried and kept as its own series — they are never combined.
+    """
+    frames = []
+    for mode in modes:
+        where, params = _where_clause([mode], openings, date_from, date_to)
+        query = f"""
+            SELECT Date,
+                   CASE WHEN White = ? THEN WhiteElo ELSE BlackElo END AS player_elo
+            FROM games
+            WHERE {where} AND Date IS NOT NULL
+            ORDER BY Date, UTCTime
+        """
+        df = pd.read_sql_query(query, conn, params=[NICKNAME, *params])
+        if df.empty:
+            continue
+        daily_last = df.groupby("Date", as_index=False)["player_elo"].last()
+        daily_last["mode"] = mode.replace("Rated ", "").replace(" game", "").capitalize()
+        frames.append(daily_last)
+
+    if not frames:
+        return pd.DataFrame(columns=["Date", "player_elo", "mode"])
+    return pd.concat(frames, ignore_index=True)
+
+
+def winrate_by_opponent_title(conn, modes, openings, date_from, date_to, min_games: int = 100) -> pd.DataFrame:
+    """Win rate per opponent title, ordered by the title's actual average rating.
+
+    Untitled opponents are excluded: they outnumber every title bucket by an
+    order of magnitude, which swamps the shared bubble-size scale.
+    """
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT
+            CASE WHEN White = ? THEN BlackTitle ELSE WhiteTitle END AS opp_title,
+            COUNT(*) AS games_played,
+            ROUND(AVG(OpponentElo), 0) AS avg_opp_elo,
+            ROUND(AVG(CASE WHEN ResultStatus = 'win' THEN 1.0 ELSE 0.0 END), 4) AS win_rate
+        FROM games
+        WHERE {where}
+        GROUP BY opp_title
+        HAVING COUNT(*) >= ?
+        ORDER BY avg_opp_elo
+    """
+    df = pd.read_sql_query(query, conn, params=[NICKNAME, *params, min_games])
+    df["opp_title"] = df["opp_title"].fillna("Untitled").replace("", "Untitled")
+    return df[df["opp_title"] != "Untitled"].reset_index(drop=True)
+
+
+def winrate_by_color_and_elo(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
+    """Win rate split by piece colour within each opponent-strength band."""
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT
+            {ELO_BAND_CASE} AS elo_band,
+            MIN(OpponentElo) AS sort_key,
+            PlayerColor,
+            COUNT(*) AS games_played,
+            ROUND(AVG(CASE WHEN ResultStatus = 'win' THEN 1.0 ELSE 0.0 END), 4) AS win_rate
+        FROM games
+        WHERE {where} AND OpponentElo IS NOT NULL
+        GROUP BY elo_band, PlayerColor
+        ORDER BY sort_key
+    """
+    return pd.read_sql_query(query, conn, params=params)
+
+
+def termination_composition(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
+    """Games and win/draw/loss counts per termination type (mosaic input)."""
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT
+            Termination AS termination,
+            COUNT(*) AS games_played,
+            SUM(CASE WHEN ResultStatus = 'win'  THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN ResultStatus = 'draw' THEN 1 ELSE 0 END) AS draws,
+            SUM(CASE WHEN ResultStatus = 'loss' THEN 1 ELSE 0 END) AS losses
+        FROM games
+        WHERE {where} AND Termination IS NOT NULL
+        GROUP BY Termination
+        ORDER BY games_played DESC
+    """
+    return pd.read_sql_query(query, conn, params=params)
+
+
+def mode_summary(conn, modes, openings, date_from, date_to, min_games: int = 50) -> pd.DataFrame:
+    """Per-mode win rate for the KPI row (replaces the retired mode bar chart)."""
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT
+            Event AS time_control,
+            COUNT(*) AS games_played,
+            ROUND(AVG(CASE WHEN ResultStatus = 'win' THEN 1.0 ELSE 0.0 END), 4) AS win_rate
+        FROM games
+        WHERE {where}
+        GROUP BY Event
+        HAVING COUNT(*) >= ?
+        ORDER BY games_played DESC
+    """
+    return pd.read_sql_query(query, conn, params=[*params, min_games])
+
+
+def peak_rating(conn, modes, openings, date_from, date_to) -> tuple[int, str]:
+    """Highest rating reached and the mode it was reached in."""
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT Event,
+               MAX(CASE WHEN White = ? THEN WhiteElo ELSE BlackElo END) AS peak
+        FROM games
+        WHERE {where}
+        GROUP BY Event
+        ORDER BY peak DESC
+        LIMIT 1
+    """
+    row = conn.execute(query, [NICKNAME, *params]).fetchone()
+    if not row or row[1] is None:
+        return 0, ""
+    mode_label = row[0].replace("Rated ", "").replace(" game", "").capitalize()
+    return int(row[1]), mode_label
 
 
 def activity_trend(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
