@@ -222,104 +222,99 @@ st.divider()
 # ------------------------------------------------------------- who I beat ---
 st.header("Who can I actually beat?")
 
-left, right = st.columns(2)
-
-with left:
-    title_df = q.winrate_by_opponent_title(conn, modes, selected_openings, date_from, date_to)
-    if title_df.empty:
-        st.info("No titled opponents in the current filter.")
-    else:
-        fig = go.Figure()
-        for _, row in title_df.iterrows():
-            fig.add_trace(
-                go.Scatter(x=[row["opp_title"]] * 2, y=[0, row["win_rate"]], mode="lines",
-                           line=dict(color="#d9d9d9", width=2), showlegend=False, hoverinfo="skip")
-            )
+title_df = q.winrate_by_opponent_title(conn, modes, selected_openings, date_from, date_to)
+if title_df.empty:
+    st.info("No titled opponents in the current filter.")
+else:
+    fig = go.Figure()
+    for _, row in title_df.iterrows():
         fig.add_trace(
-            go.Scatter(
-                x=title_df["opp_title"], y=title_df["win_rate"], mode="markers+text",
-                marker=dict(
-                    size=np.sqrt(title_df["games_played"]) * 2.2,
-                    color=title_df["win_rate"], colorscale="RdYlGn", cmin=0.2, cmax=0.7,
-                    line=dict(color="black", width=1), showscale=False,
-                ),
-                text=[f"{r:.0%}<br>n={n:,}" for r, n in
-                      zip(title_df["win_rate"], title_df["games_played"])],
-                textposition="top center", showlegend=False,
-                hovertemplate="%{x}<br>Win rate %{y:.1%}<extra></extra>",
-            )
+            go.Scatter(x=[row["opp_title"]] * 2, y=[0, row["win_rate"]], mode="lines",
+                       line=dict(color="#d9d9d9", width=2), showlegend=False, hoverinfo="skip")
         )
-        fig.add_hline(y=0.5, line_dash="dash", line_color="gray",
-                      annotation_text="50%", annotation_position="top left")
-        fig.update_yaxes(tickformat=".0%", range=[0, 0.9], title="Win rate")
-        fig.update_xaxes(title="Opponent title (ordered by their average rating)")
-        fig.update_layout(height=420, margin=dict(t=30, b=10))
+    fig.add_trace(
+        go.Scatter(
+            x=title_df["opp_title"], y=title_df["win_rate"], mode="markers+text",
+            marker=dict(
+                size=np.sqrt(title_df["games_played"]) * 2.6,
+                color=title_df["win_rate"], colorscale="RdYlGn", cmin=0.2, cmax=0.7,
+                line=dict(color="black", width=1), showscale=False,
+            ),
+            text=[f"{r:.0%}<br>n={n:,}" for r, n in
+                  zip(title_df["win_rate"], title_df["games_played"])],
+            textposition="top center", showlegend=False,
+            hovertemplate="%{x}<br>Win rate %{y:.1%}<extra></extra>",
+        )
+    )
+    fig.add_hline(y=0.5, line_dash="dash", line_color="gray",
+                  annotation_text="50%", annotation_position="top left")
+    fig.update_yaxes(tickformat=".0%", range=[0, 0.9], title="Win rate")
+    fig.update_xaxes(title="Opponent title (ordered by their average rating)")
+    fig.update_layout(height=480, margin=dict(t=30, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+
+    gm = title_df[title_df["opp_title"] == "GM"]
+    gm_bit = (
+        f" Against Grandmasters specifically: {pct(gm.iloc[0]['win_rate'])} "
+        f"over {int(gm.iloc[0]['games_played']):,} games."
+        if not gm.empty else ""
+    )
+    st.caption(
+        "**Bubble chart with sample size encoded.** Bubble area is the number of games, so a "
+        "flattering win rate built on a thin sample can't hide behind a tall bar." + gm_bit
+    )
+
+ce_df = q.winrate_by_color_and_elo(conn, modes, selected_openings, date_from, date_to)
+if ce_df.empty:
+    st.info("Not enough data for the colour comparison in the current filter.")
+else:
+    wide = ce_df.pivot_table(
+        index=["elo_band", "sort_key"], columns="PlayerColor", values="win_rate"
+    ).reset_index().sort_values("sort_key")
+
+    if {"White", "Black"}.issubset(wide.columns):
+        band_order = wide["elo_band"].tolist()
+        line_x, line_y = [], []
+        for _, r in wide.iterrows():
+            line_x += [r["Black"], r["White"], None]
+            line_y += [r["elo_band"], r["elo_band"], None]
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=line_x, y=line_y, mode="lines",
+                                 line=dict(color="#d9d9d9", width=3), hoverinfo="skip",
+                                 showlegend=False))
+        fig.add_trace(go.Scatter(
+            x=wide["Black"], y=wide["elo_band"], mode="markers", name="as Black",
+            marker=dict(color=BLACK_PIECE, size=15, line=dict(color="black", width=1)),
+            hovertemplate="as Black · %{y}<br>Win rate %{x:.1%}<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=wide["White"], y=wide["elo_band"], mode="markers", name="as White",
+            marker=dict(color=WHITE_PIECE, size=15, line=dict(color="black", width=1.5)),
+            hovertemplate="as White · %{y}<br>Win rate %{x:.1%}<extra></extra>",
+        ))
+        for _, r in wide.iterrows():
+            gap = (r["White"] - r["Black"]) * 100
+            fig.add_annotation(
+                x=max(r["White"], r["Black"]), y=r["elo_band"], text=f"  +{gap:.1f}pp",
+                showarrow=False, xanchor="left", font=dict(size=12, color="#444"),
+            )
+        fig.update_yaxes(categoryorder="array", categoryarray=band_order,
+                         title="Opponent rating band")
+        fig.update_xaxes(tickformat=".0%", title="Win rate",
+                         range=[0, max(wide[["White", "Black"]].max()) + 0.15])
+        fig.update_layout(height=430, margin=dict(t=30, b=10),
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig, use_container_width=True)
 
-        gm = title_df[title_df["opp_title"] == "GM"]
-        gm_bit = (
-            f" Against Grandmasters specifically: {pct(gm.iloc[0]['win_rate'])} "
-            f"over {int(gm.iloc[0]['games_played']):,} games."
-            if not gm.empty else ""
-        )
+        avg_gap = (wide["White"] - wide["Black"]).mean() * 100
         st.caption(
-            "**Bubble chart with sample size encoded.** Bubble area is the number of games, so a "
-            "flattering win rate built on a thin sample can't hide behind a tall bar." + gm_bit
+            f"**Cleveland paired dot plot.** As a single pair of bars this was two numbers and "
+            f"nothing to see. Split across opponent strength it becomes a finding: the "
+            f"first-move advantage holds in every band, averaging **+{avg_gap:.1f} points**."
         )
-
-with right:
-    ce_df = q.winrate_by_color_and_elo(conn, modes, selected_openings, date_from, date_to)
-    if ce_df.empty:
-        st.info("Not enough data for the colour comparison in the current filter.")
     else:
-        wide = ce_df.pivot_table(
-            index=["elo_band", "sort_key"], columns="PlayerColor", values="win_rate"
-        ).reset_index().sort_values("sort_key")
-        counts = ce_df.groupby("elo_band")["games_played"].sum()
-
-        if {"White", "Black"}.issubset(wide.columns):
-            band_order = wide["elo_band"].tolist()
-            line_x, line_y = [], []
-            for _, r in wide.iterrows():
-                line_x += [r["Black"], r["White"], None]
-                line_y += [r["elo_band"], r["elo_band"], None]
-
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=line_x, y=line_y, mode="lines",
-                                     line=dict(color="#d9d9d9", width=3), hoverinfo="skip",
-                                     showlegend=False))
-            fig.add_trace(go.Scatter(
-                x=wide["Black"], y=wide["elo_band"], mode="markers", name="as Black",
-                marker=dict(color=BLACK_PIECE, size=13, line=dict(color="black", width=1)),
-                hovertemplate="as Black · %{y}<br>Win rate %{x:.1%}<extra></extra>",
-            ))
-            fig.add_trace(go.Scatter(
-                x=wide["White"], y=wide["elo_band"], mode="markers", name="as White",
-                marker=dict(color=WHITE_PIECE, size=13, line=dict(color="black", width=1.5)),
-                hovertemplate="as White · %{y}<br>Win rate %{x:.1%}<extra></extra>",
-            ))
-            for _, r in wide.iterrows():
-                gap = (r["White"] - r["Black"]) * 100
-                fig.add_annotation(
-                    x=max(r["White"], r["Black"]), y=r["elo_band"], text=f"  +{gap:.1f}pp",
-                    showarrow=False, xanchor="left", font=dict(size=11, color="#444"),
-                )
-            fig.update_yaxes(categoryorder="array", categoryarray=band_order,
-                             title="Opponent rating band")
-            fig.update_xaxes(tickformat=".0%", title="Win rate",
-                             range=[0, max(wide[["White", "Black"]].max()) + 0.18])
-            fig.update_layout(height=420, margin=dict(t=30, b=10),
-                              legend=dict(orientation="h", yanchor="bottom", y=1.02))
-            st.plotly_chart(fig, use_container_width=True)
-
-            avg_gap = (wide["White"] - wide["Black"]).mean() * 100
-            st.caption(
-                f"**Cleveland paired dot plot.** As a single pair of bars this was two numbers and "
-                f"nothing to see. Split across opponent strength it becomes a finding: the "
-                f"first-move advantage holds in every band, averaging **+{avg_gap:.1f} points**."
-            )
-        else:
-            st.info("Both colours are needed for this comparison.")
+        st.info("Both colours are needed for this comparison.")
 
 st.divider()
 
@@ -335,14 +330,25 @@ if not term_df.empty:
     for part in ("wins", "draws", "losses"):
         term_df[f"{part}_share"] = term_df[part] / term_df["games_played"]
 
+    # a small gutter between columns so the mosaic reads as separate blocks
+    gutter = 0.012
+    term_df["draw_width"] = (term_df["width"] - gutter).clip(lower=0.01)
+
     fig = go.Figure()
-    for part, color, label in (
-        ("wins", WIN, "Win"), ("draws", DRAW, "Draw"), ("losses", LOSS, "Loss")
+    for part, color, label, text_color in (
+        ("wins", WIN, "Win", "white"),
+        ("draws", DRAW, "Draw", "#333"),
+        ("losses", LOSS, "Loss", "white"),
     ):
+        share = term_df[f"{part}_share"]
+        # only label a block that is tall enough to hold the text
+        labels = [f"{s:.0%}" if s >= 0.08 else "" for s in share]
         fig.add_trace(
             go.Bar(
-                x=term_df["center"], y=term_df[f"{part}_share"], width=term_df["width"],
-                name=label, marker_color=color, marker_line=dict(color="white", width=2),
+                x=term_df["center"], y=share, width=term_df["draw_width"],
+                name=label, marker_color=color,
+                text=labels, textposition="inside", insidetextanchor="middle",
+                textfont=dict(color=text_color, size=15),
                 customdata=np.stack([term_df["termination"], term_df[part]], axis=-1),
                 hovertemplate="%{customdata[0]} · " + label
                               + "<br>%{y:.1%} (%{customdata[1]:,} games)<extra></extra>",
@@ -351,12 +357,12 @@ if not term_df.empty:
     for _, r in term_df.iterrows():
         # yref="paper" keeps the label above the plot instead of clipping it at y=1
         fig.add_annotation(
-            x=r["center"], y=1.10, yref="paper", showarrow=False,
+            x=r["center"], y=1.16, yref="paper", showarrow=False,
             text=f"<b>{r['termination']}</b><br>{r['width']:.0%} of games ({int(r['games_played']):,})",
             font=dict(size=12),
         )
     fig.update_layout(
-        barmode="stack", height=440, margin=dict(t=95, b=10), bargap=0,
+        barmode="stack", height=460, margin=dict(t=115, b=10), bargap=0,
         legend=dict(orientation="h", yanchor="bottom", y=-0.18),
     )
     fig.update_xaxes(visible=False, range=[0, 1])
@@ -385,52 +391,48 @@ st.divider()
 # ------------------------------------------------------- what and when ---
 st.header("What and when do I play?")
 
-left2, right2 = st.columns([3, 2])
+opening_df = q.winrate_by_opening(conn, modes, selected_openings, date_from, date_to, top_n=25)
+if opening_df.empty:
+    st.info("No openings pass the 10-game threshold in the current filter.")
+else:
+    fig = px.treemap(
+        opening_df, path=["Opening"], values="games_played", color="win_rate",
+        # 0.3-0.7 keeps 50% exactly on the grey midpoint while giving the
+        # near-breakeven majority of openings visible colour separation
+        color_continuous_scale=[[0, LOSS], [0.5, "#d9d9d9"], [1, WIN]], range_color=[0.3, 0.7],
+        hover_data=["games_played", "win_rate"],
+    )
+    fig.update_traces(textinfo="label+percent entry")
+    fig.update_layout(height=520, margin=dict(t=10, b=10, l=0, r=0),
+                      coloraxis_colorbar=dict(title="Win rate", tickformat=".0%"))
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "**Treemap.** Tile size is how often an opening is played, colour is how well it does — "
+        "grey sits at exactly 50%, so the colour midpoint means 'break even' rather than "
+        "'middling'."
+    )
 
-with left2:
-    opening_df = q.winrate_by_opening(conn, modes, selected_openings, date_from, date_to, top_n=25)
-    if opening_df.empty:
-        st.info("No openings pass the 10-game threshold in the current filter.")
-    else:
-        fig = px.treemap(
-            opening_df, path=["Opening"], values="games_played", color="win_rate",
-            # 0.3-0.7 keeps 50% exactly on the grey midpoint while giving the
-            # near-breakeven majority of openings visible colour separation
-            color_continuous_scale=[[0, LOSS], [0.5, "#d9d9d9"], [1, WIN]], range_color=[0.3, 0.7],
-            hover_data=["games_played", "win_rate"],
-        )
-        fig.update_traces(textinfo="label+percent entry")
-        fig.update_layout(height=430, margin=dict(t=10, b=10, l=0, r=0),
-                          coloraxis_colorbar=dict(title="Win rate", tickformat=".0%"))
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(
-            "**Treemap.** Tile size is how often an opening is played, colour is how well it does — "
-            "grey sits at exactly 50%, so the colour midpoint means 'break even' rather than "
-            "'middling'."
-        )
-
-with right2:
-    hour_df = q.winrate_by_hour(conn, modes, selected_openings, date_from, date_to)
-    if hour_df.empty:
-        st.info("No games in the current filter.")
-    else:
-        hour_df = pd.merge(pd.DataFrame({"Hour": range(24)}), hour_df, on="Hour", how="left").fillna(0)
-        hour_df["HourLabel"] = hour_df["Hour"].apply(lambda h: f"{int(h):02d}:00")
-        fig = px.bar_polar(
-            hour_df, r="win_rate", theta="HourLabel", color="win_rate",
-            color_continuous_scale="Purples", hover_data=["games_played"],
-            labels={"win_rate": "Win rate", "HourLabel": "Hour (UTC)"},
-        )
-        fig.update_layout(
-            height=430, margin=dict(t=10, b=10),
-            polar=dict(radialaxis=dict(tickformat=".0%")),
-            coloraxis_colorbar=dict(title="Win rate", tickformat=".0%"),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(
-            "**Polar rose.** Hours wrap around a circle, so a circular axis fits the data better "
-            "than a bar chart that cuts midnight in half. Thin wedges are thin samples."
-        )
+hour_df = q.winrate_by_hour(conn, modes, selected_openings, date_from, date_to)
+if hour_df.empty:
+    st.info("No games in the current filter.")
+else:
+    hour_df = pd.merge(pd.DataFrame({"Hour": range(24)}), hour_df, on="Hour", how="left").fillna(0)
+    hour_df["HourLabel"] = hour_df["Hour"].apply(lambda h: f"{int(h):02d}:00")
+    fig = px.bar_polar(
+        hour_df, r="win_rate", theta="HourLabel", color="win_rate",
+        color_continuous_scale="Purples", hover_data=["games_played"],
+        labels={"win_rate": "Win rate", "HourLabel": "Hour (UTC)"},
+    )
+    fig.update_layout(
+        height=560, margin=dict(t=20, b=20),
+        polar=dict(radialaxis=dict(tickformat=".0%")),
+        coloraxis_colorbar=dict(title="Win rate", tickformat=".0%"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "**Polar rose.** Hours wrap around a circle, so a circular axis fits the data better "
+        "than a bar chart that cuts midnight in half. Thin wedges are thin samples."
+    )
 
 st.divider()
 
