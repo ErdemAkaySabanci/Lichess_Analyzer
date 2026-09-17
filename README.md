@@ -51,10 +51,10 @@ requirements.txt
 
 ## Key Findings
 
-- **Best opening: Ruy Lopez (Berlin Defense).** Across rated bullet games with at least 20 games played, the Berlin Defense has the highest win rate at **77.8%** (35/45 games) — see [`sql/02_winrate_by_opening.sql`](sql/02_winrate_by_opening.sql).
-- **The white-piece advantage is real, here too.** In rated bullet games, playing White wins **55.2%** of the time versus **50.1%** as Black — a ~5-point edge consistent with the first-move advantage chess theory predicts.
-- **Performance drops significantly against much stronger opponents.** A two-sample t-test comparing win rate against opponents rated above 2900 vs. everyone else rejects the null hypothesis of equal performance (p < 0.001) — see Section 7.1 of the notebook.
-- **Time pressure matters more than the clock alone would suggest.** In a Logistic Regression model predicting win/draw/loss from rating gap, piece color, time-forfeit terminations and hour of day, **time-forfeit outcomes and rating gap were the two strongest predictors** — stronger than color or hour — at 58% test accuracy (vs. a ~53% majority-class baseline).
+- **The clock is a weapon, not a weakness.** Games decided on time are a **79.3%** win rate; games decided over the board are **45.2%**. The first draft of this project's write-up claimed the opposite — the mosaic plot in the dashboard is what caught the error.
+- **The white-piece advantage holds at every level of opposition.** Splitting win rate by piece colour *within* each opponent-rating band shows White ahead in all five bands, averaging **+4.8 percentage points** — the edge doesn't evaporate against stronger players.
+- **Performance degrades sharply with opponent strength.** Win rate falls from 59% against CMs to **36.4% across 3,613 games against Grandmasters**; a two-sample t-test against the 2900+ cohort rejects equal performance (p < 0.001).
+- **Best opening: Ruy Lopez (Berlin Defense)** — **70.7%** over 58 rated games, the strongest result among openings with a defensible sample size.
 
 > Some intermediate notebook cells (feature engineering for the model, the
 > ECO→opening name mapping, the combined opening win-rate table) were
@@ -100,7 +100,30 @@ _(free-tier hosting — first load after idle can take ~15-20s to wake up)_
 Screenshots from a local run:
 
 ![Dashboard overview](dashboard/screenshots/overview.png)
-![Elo range, hour-of-day and opening charts](dashboard/screenshots/charts.png)
+![Rating trajectory and opponent-strength heatmap strip](dashboard/screenshots/strength.png)
+![Opponent-title bubble chart and Cleveland paired dot plot](dashboard/screenshots/opponents.png)
+![Marimekko mosaic of termination type vs. outcome](dashboard/screenshots/terminations.png)
+
+### On the chart choices
+
+The dashboard deliberately avoids defaulting to bar charts. Each form was picked
+from the shape of the data it displays:
+
+| Chart | Why this form |
+|---|---|
+| Calendar heatmap | Daily counts over a calendar structure; a fixed colour scale across years makes growth comparable |
+| Line per rating pool | Bullet and blitz are separate Lichess pools, so they are plotted as separate series and never averaged |
+| Single-row heatmap strip | An ordered scale where only the gradient matters — no bar heights to compare |
+| Bubble chart (size = games) | Encodes sample size alongside win rate, so a thin-sample result can't masquerade as a strong one |
+| Cleveland paired dot plot | Two series across ordered bands; the gap between dots *is* the finding |
+| Marimekko / mosaic | Two dimensions at once — column width is volume, column height is composition |
+| Treemap | Many categories where relative volume matters; a diverging scale with a grey midpoint pinned to 50% |
+| Polar rose | Hours are cyclical, so a circular axis avoids cutting midnight in half |
+
+Two comparisons — win rate by time control, and White vs. Black overall — were
+retired as standalone charts: each was two numbers, and no chart form fixes that.
+The first moved into the KPI row; the second was rebuilt as the paired dot plot,
+split across opponent strength, where it finally had something to say.
 
 ### Deploying the dashboard (Streamlit Community Cloud, free)
 
