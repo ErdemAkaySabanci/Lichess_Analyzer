@@ -1,0 +1,15 @@
+name: Keep Streamlit demo awake
+
+on:
+  schedule:
+    # Every 10 hours - Streamlit Community Cloud sleeps an app after
+    # ~12 hours without traffic, so this stays safely under that limit.
+    - cron: "0 */10 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request the dashboard so it registers as traffic
+        run: curl -sSf --max-time 30 --retry 3 --retry-delay 10 -o /dev/null https://lichessanalyzer-kunhdct4haer6ezadhndcf.streamlit.app/
