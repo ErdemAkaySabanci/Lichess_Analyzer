@@ -20,24 +20,57 @@ WHITE_PIECE, BLACK_PIECE = "#e8eced", "#2d3436"
 MODE_COLORS = {"Bullet": "#4C78A8", "Blitz": "#F58518", "Classical": "#54A24B"}
 CALENDAR_ZMAX = 20
 REPO_URL = "https://github.com/ErdemAkaySabanci/Lichess_Analyzer"
+PLAYER = q.NICKNAME
+PLAYER_LINK = f"[{PLAYER}](https://lichess.org/@/{PLAYER})"
+ANALYST = "Erdem Akay"
 
-st.set_page_config(page_title="Lichess Performance Dashboard", page_icon="♟️", layout="wide")
+st.set_page_config(page_title="Lichess Performance Analytics", page_icon="♟️", layout="wide")
 
 
 def pct(x: float) -> str:
     return f"{x:.1%}"
 
 
-st.title("♟️ Eight years of bullet chess, as data")
-st.markdown(
-    f"**28,838 games** played on [Lichess.org](https://lichess.org) between 2016 and 2024, "
-    f"exported as raw PGN and rebuilt into a cleaned dataset, a SQL layer and this dashboard. "
-    f"Every chart below is a SQL query against `sql/lichess.db` — [code on GitHub]({REPO_URL})."
-)
-
 conn = q.get_connection()
 min_date, max_date = q.get_date_bounds(conn)
 opening_options = q.get_opening_options(conn, min_games=10)
+
+st.title("♟️ Lichess Performance Analytics")
+st.markdown(
+    f"An end-to-end data analysis of **28,838 games** played on [Lichess.org](https://lichess.org) "
+    f"by {PLAYER_LINK}, a friend's account, between {min_date[:4]} and {max_date[:4]}. "
+    f"The raw PGN export was cleaned in pandas, loaded into SQLite, and every chart below is a "
+    f"SQL query rendered with Plotly. Analysis and dashboard by **{ANALYST}** · "
+    f"[code on GitHub]({REPO_URL})"
+)
+
+with st.expander("About this analysis — data, pipeline and method"):
+    st.markdown(
+        f"""
+**Data.** The complete game history of the Lichess account {PLAYER_LINK} (a friend's account),
+exported as PGN: one block of metadata tags per game — players, ratings, titles, time control,
+ECO opening code, result, termination and UTC timestamp.
+
+**Pipeline.** Raw PGN → parsed and cleaned with pandas → feature engineering (opponent rating
+and rating band, piece colour, hour of day, ECO code → opening name) → loaded into SQLite →
+parametrized SQL queries (`GROUP BY`, `CASE WHEN`, CTEs, window functions) → Plotly charts.
+
+**Questions this dashboard answers.**
+- How active is the player, and how has that changed over time?
+- How does win rate change as opponents get stronger, and does the White-piece advantage hold at every level?
+- Which titled opponents does the player beat, and which not?
+- Are games won on the clock or over the board?
+- Which openings and which hours of the day produce the best results?
+
+**Beyond the dashboard.** The [analysis notebook]({REPO_URL}/blob/main/notebooks/lichess_analysis.ipynb)
+adds hypothesis testing (Welch's t-tests) and a logistic regression model on which factors are
+associated with winning.
+
+**Reading the numbers.** Win rate is wins ÷ all games, so draws count as non-wins. Bullet,
+blitz and classical are separate Lichess rating pools and are never averaged together. All times
+are UTC. Charts show sample sizes on hover — small bands and thin wedges are noisy.
+"""
+    )
 
 with st.sidebar:
     st.header("Filters")
@@ -54,7 +87,8 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        f"Data: Lichess PGN export · Built with pandas, SQLite, Plotly & Streamlit · "
+        f"Data: Lichess PGN export of {PLAYER} (a friend's account) · "
+        f"Analysis: {ANALYST} · Built with pandas, SQLite, Plotly & Streamlit · "
         f"[Repo]({REPO_URL})"
     )
 
@@ -90,7 +124,7 @@ if not mode_df.empty:
 st.divider()
 
 # ---------------------------------------------------------------- activity ---
-st.header("How much do I actually play?")
+st.header(f"Activity: how much does {PLAYER} play?")
 
 daily_df = q.daily_activity(conn, modes, selected_openings, date_from, date_to)
 if not daily_df.empty:
@@ -163,7 +197,7 @@ if not trend_df.empty:
 st.divider()
 
 # ----------------------------------------------------------------- strength ---
-st.header("How strong am I, really?")
+st.header("Strength: how does performance change against stronger opponents?")
 
 elo_traj = q.elo_trajectory(conn, modes, selected_openings, date_from, date_to)
 if not elo_traj.empty:
@@ -219,8 +253,8 @@ if not elo_df.empty:
 
 st.divider()
 
-# ------------------------------------------------------------- who I beat ---
-st.header("Who can I actually beat?")
+# ------------------------------------------------------------ opponents ---
+st.header(f"Opponents: who does {PLAYER} beat?")
 
 title_df = q.winrate_by_opponent_title(conn, modes, selected_openings, date_from, date_to)
 if title_df.empty:
@@ -319,7 +353,7 @@ else:
 st.divider()
 
 # ---------------------------------------------------------- how games end ---
-st.header("How do my games end?")
+st.header("Terminations: are games won on the clock or over the board?")
 
 term_df = q.termination_composition(conn, modes, selected_openings, date_from, date_to)
 if not term_df.empty:
@@ -374,11 +408,11 @@ if not term_df.empty:
     if not normal.empty and not forfeit.empty:
         st.caption(
             f"**Marimekko / mosaic plot — column width is volume, column height is composition.** "
-            f"This is the chart that corrected me. I had written that time pressure was my weakness; "
-            f"games decided on the clock are actually a "
-            f"**{pct(forfeit.iloc[0]['wins_share'])} win rate** against "
-            f"**{pct(normal.iloc[0]['wins_share'])}** when a game is decided over the board. "
-            f"The clock is where I win — being outplayed is where I lose."
+            f"This chart overturned an early hypothesis of this analysis, that time pressure was "
+            f"the player's weakness. Games decided on the clock are a "
+            f"**{pct(forfeit.iloc[0]['wins_share'])} win rate**, against "
+            f"**{pct(normal.iloc[0]['wins_share'])}** when a game is decided over the board: "
+            f"the clock is where {PLAYER} wins, and being outplayed is where the losses come from."
         )
     else:
         st.caption(
@@ -389,7 +423,7 @@ if not term_df.empty:
 st.divider()
 
 # ------------------------------------------------------- what and when ---
-st.header("What and when do I play?")
+st.header("Openings and timing: what and when does the player win?")
 
 opening_df = q.winrate_by_opening(conn, modes, selected_openings, date_from, date_to, top_n=25)
 if opening_df.empty:
@@ -447,7 +481,7 @@ with st.expander("Underlying data tables"):
     st.write("Monthly activity trend", trend_df)
 
 st.caption(
-    f"Raw data: personal PGN export from Lichess.org · cleaning in pandas · "
+    f"Raw data: PGN export of {PLAYER}'s Lichess history (a friend's account) · cleaning in pandas · "
     f"analysis layer in SQL over SQLite · charts in Plotly · app in Streamlit · "
-    f"[notebook, SQL queries and source]({REPO_URL})"
+    f"analysis by {ANALYST} · [notebook, SQL queries and source]({REPO_URL})"
 )

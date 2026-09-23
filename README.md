@@ -1,8 +1,9 @@
 # Lichess Chess Performance Analytics
 
-An end-to-end data analytics project built on 28,800+ rated games played on
-[Lichess.org](https://lichess.org) by a high-level chess player, covering
-the full path from a raw PGN export to a deployed interactive dashboard.
+An end-to-end data analytics project built on 28,800+ games played on
+[Lichess.org](https://lichess.org) by [legend2014](https://lichess.org/@/legend2014),
+a friend's account, covering the full path from a raw PGN export to a
+deployed interactive dashboard.
 The project reimplements and extends an original university report — data
 extraction, cleaning, exploratory analysis, hypothesis testing, and a
 logistic regression model — and adds a SQL analytics layer and a Streamlit +
@@ -26,8 +27,9 @@ about the player's game history:
 
 ## Data Source
 
-The raw data is a PGN (Portable Game Notation) export of a Lichess account's
-full game history — one metadata block plus move list per game. See
+The raw data is a PGN (Portable Game Notation) export of the full game
+history of the Lichess account `legend2014`, which belongs to a friend of
+the author — one metadata block plus move list per game. See
 [`data/raw/my_lichess_history.txt`](data/raw/my_lichess_history.txt).
 
 Fields used by the analysis include `Event` (time control), `White` /
@@ -278,6 +280,7 @@ Then open the local URL Streamlit prints (defaults to `http://localhost:8501`).
 
 ## Author
 
-Erdem Akay
-Computer Science & Engineering
-Sabancı University
+**Erdem Akay** — Computer Science & Engineering, Sabancı University
+
+Analysis, SQL layer and dashboard by Erdem Akay. The game data comes from
+a friend's Lichess account (`legend2014`).
