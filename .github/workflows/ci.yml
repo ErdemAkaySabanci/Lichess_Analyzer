@@ -1,0 +1,53 @@
+name: Data pipeline CI
+
+# Runs the whole pipeline on a committed, API-shaped fixture: no network calls,
+# no token. Ingestion -> dbt build (models + tests) -> parity with the legacy
+# pandas pipeline -> export -> dashboard renders against the exported database.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    env:
+      DUCKDB_PATH: ${{ github.workspace }}/pipeline/warehouse/ci.duckdb
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pipeline/requirements.txt
+            dashboard/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r pipeline/requirements.txt
+          pip install -r dashboard/requirements.txt
+
+      - name: Ingest the fixture into raw.games
+        run: python pipeline/ingest.py --from-file pipeline/fixtures/games_sample.ndjson
+
+      - name: Ingesting twice adds nothing (idempotent)
+        run: |
+          python pipeline/ingest.py --from-file pipeline/fixtures/games_sample.ndjson | tee ingest_second_run.txt
+          grep -q "Inserted 0 new games" ingest_second_run.txt
+
+      - name: dbt build (seeds, models and data tests)
+        working-directory: dbt/lichess
+        run: dbt build --profiles-dir .
+
+      - name: Parity with the legacy pandas pipeline
+        run: python pipeline/check_parity.py --strict
+
+      - name: Export the mart to SQLite
+        run: python pipeline/export_to_sqlite.py --out ${{ runner.temp }}/lichess_ci.db
+
+      - name: Dashboard renders against the exported database
+        run: python pipeline/smoke_test_dashboard.py ${{ runner.temp }}/lichess_ci.db

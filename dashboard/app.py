@@ -475,11 +475,15 @@ else:
 st.divider()
 
 # ------------------------------------------------------------- experiments ---
-st.header("Experiments: is it skill, or could it be chance?")
+st.header("A/B Testing: is it skill, or could it be chance?")
 st.markdown(
-    "A/B-test tools applied to observational data. Nobody randomly assigned these games, so "
-    "only the colour comparison (Lichess pairs colours at random) comes close to a controlled "
-    "experiment; the streak analysis shows association, not cause."
+    "**How an A/B test maps onto this data.** Group A and group B are two sets of games, the "
+    "metric is win rate, and the question is whether the gap between them is real or just noise. "
+    "Test 1 is a genuine A/B test: the \"treatment\" is the piece colour, and Lichess assigns it "
+    "at random, so the groups are comparable by design. Test 2 has no randomization, so it is a "
+    "quasi-experiment and is read as association, not cause. Both use the standard A/B toolkit: "
+    "two-proportion z-test, confidence intervals, odds ratio, sample-ratio check, A/A test and "
+    "power analysis."
 )
 
 MIN_ARM = 30  # games per group below which a test is not worth reporting
@@ -491,7 +495,7 @@ def fmt_p(p: float) -> str:
 
 
 # ---- test 1: White vs Black ------------------------------------------------
-st.subheader("Test 1 · White vs Black")
+st.subheader("A/B test 1 · White (A) vs Black (B)")
 color_df = q.color_experiment(conn, modes, selected_openings, date_from, date_to)
 
 arms = []
@@ -513,8 +517,8 @@ else:
     c1.metric("White minus Black win rate", f"{overall.diff * 100:+.1f} pp")
     c2.metric("95% confidence interval", f"{overall.ci_low * 100:+.1f} to {overall.ci_high * 100:+.1f} pp")
     c3.metric("p-value", fmt_p(overall.p_value))
-    c4.metric("Odds ratio", f"{overall.odds_ratio:.2f}",
-              f"{overall.or_ci_low:.2f}–{overall.or_ci_high:.2f}", delta_color="off")
+    c4.metric(f"Odds ratio (95% CI {overall.or_ci_low:.2f}–{overall.or_ci_high:.2f})",
+              f"{overall.odds_ratio:.2f}")
 
     fig = go.Figure()
     fig.add_vline(x=0, line_dash="dash", line_color="gray")
@@ -544,7 +548,7 @@ else:
     )
 
 # ---- test 2: streaks -------------------------------------------------------
-st.subheader("Test 2 · Does the previous result carry over?")
+st.subheader("Quasi-experiment 2 · After a win (A) vs after a loss (B)")
 tilt_df = q.tilt_experiment(conn, modes, selected_openings, date_from, date_to)
 
 tilt_total = tilt_df.groupby("PrevResult").agg(
@@ -571,11 +575,11 @@ else:
     adjusted = stats.stratified_diff(strata)
 
     t1, t2, t3 = st.columns(3)
-    t1.metric("After a win vs after a loss", f"{crude.diff * 100:+.1f} pp",
-              f"{crude.ci_low * 100:+.1f} to {crude.ci_high * 100:+.1f}", delta_color="off")
+    t1.metric(f"After a win vs a loss (95% CI {crude.ci_low * 100:+.1f} to {crude.ci_high * 100:+.1f})",
+              f"{crude.diff * 100:+.1f} pp")
     if adjusted:
-        t2.metric("Same, within opponent-rating bands", f"{adjusted[0] * 100:+.1f} pp",
-                  f"{adjusted[1] * 100:+.1f} to {adjusted[2] * 100:+.1f}", delta_color="off")
+        t2.metric(f"Within opponent-rating bands (95% CI {adjusted[1] * 100:+.1f} to {adjusted[2] * 100:+.1f})",
+                  f"{adjusted[0] * 100:+.1f} pp")
     t3.metric("p-value (raw gap)", fmt_p(crude.p_value))
 
     order = [r for r in ("loss", "draw", "win") if r in tilt_total.index]
@@ -624,20 +628,74 @@ def aa_rate(modes_key, openings_key, d_from, d_to):
 wins_n = metrics["total_games"]
 m1, m2, m3 = st.columns(3)
 if wins_n >= 2 * MIN_ARM:
-    m1.metric("A/A test false-positive rate", f"{aa_rate(tuple(modes), tuple(selected_openings), date_from, date_to):.1%}",
-              "target ≈ 5.0%", delta_color="off")
+    m1.metric("A/A test false-positive rate (target ≈ 5%)",
+              f"{aa_rate(tuple(modes), tuple(selected_openings), date_from, date_to):.1%}")
 base = metrics["win_rate"]
 arm_n = max(wins_n // 2, 1)
-m2.metric("Smallest detectable gap", f"{stats.minimum_detectable_diff(arm_n, base) * 100:.1f} pp",
-          f"{arm_n:,} games per group, 80% power", delta_color="off")
+m2.metric(f"Smallest detectable gap ({arm_n:,} games per group, 80% power)",
+          f"{stats.minimum_detectable_diff(arm_n, base) * 100:.1f} pp")
 if 0 < base < 1 and base + 0.02 < 1:
-    m3.metric("Games needed to detect 2 pp", f"{stats.required_n_per_group(base, base + 0.02):,}",
-              "per group", delta_color="off")
+    m3.metric("Games per group needed to detect 2 pp",
+              f"{stats.required_n_per_group(base, base + 0.02):,}")
 st.caption(
     "**Does the test itself behave?** An A/A test splits the very same games at random into two "
     "halves and counts how often the z-test wrongly reports a difference; a sound test does so "
     "about 5% of the time. The other two numbers are the power analysis: how small a gap this much "
     "data can reliably detect, and how many games per group a 2-point difference would need."
+)
+
+# ---- design implications ---------------------------------------------------
+st.subheader("From findings to design hypotheses")
+st.markdown(
+    "Treating these results as player-behaviour data from a competitive game, each one suggests a "
+    "design question and the A/B test that would answer it. These are hypotheses to test, not "
+    "conclusions this dataset can prove (figures are for the full history)."
+)
+d1, d2, d3 = st.columns(3)
+d1.markdown(
+    """
+**Balance: first-move advantage**
+
+*Finding.* White wins about 5 points more often, and the gap holds across time controls.
+
+*Design question.* Does the advantage make matchmaking feel unfair, and does a small
+compensation for the second player (e.g. a rating or reward adjustment) reduce it?
+
+*Test.* Randomize compensation for the second player; metric: win-rate gap and
+games played per day; guardrail: overall win rate.
+"""
+)
+d2.markdown(
+    """
+**Engagement: results carry over**
+
+*Finding.* The next game is won more often after a win than after a loss, even within the
+same opponent-strength band.
+
+*Design question.* Is momentum a retention lever, and does a loss need a softer landing
+(easier next match, a short recap) so players keep going?
+
+*Test.* Randomize the next-opponent difficulty after a loss; metric: share of players who
+start another game within 30 minutes; guardrail: session win rate.
+"""
+)
+d3.markdown(
+    """
+**Mechanics: the clock decides games**
+
+*Finding.* Games decided on the clock are won far more often than games decided over the
+board (see Terminations above).
+
+*Design question.* Is time pressure a skill being rewarded or a frustration being created,
+and does a time bonus per move change how games end?
+
+*Test.* Randomize the increment between players of the same rating; metric: share of
+games ending on time and completion rate.
+"""
+)
+st.caption(
+    "Every test above would need a pre-test power analysis like the one in this section "
+    "and a sample-ratio check after launch."
 )
 
 st.divider()

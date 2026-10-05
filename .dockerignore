@@ -1,0 +1,9 @@
+.git
+.venv
+.venv-pipeline
+**/__pycache__
+data/raw
+pipeline/warehouse
+dbt/lichess/target
+dbt/lichess/logs
+dashboard/screenshots

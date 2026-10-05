@@ -1,0 +1,31 @@
+name: lichess
+version: "1.0.0"
+config-version: 2
+profile: lichess
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+vars:
+  # Keep in sync with NICKNAME in notebooks/data_pipeline.py and dashboard/queries.py.
+  player_name: "legend2014"
+  # A new session starts when a game begins more than this long after the previous one.
+  session_gap_minutes: 30
+
+models:
+  lichess:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    marts:
+      +materialized: table
+
+seeds:
+  lichess:
+    eco_openings:
+      +column_types: {eco: varchar, opening_name: varchar}
+    variant_names:
+      +column_types: {variant_key: varchar, variant_name: varchar}

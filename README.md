@@ -184,12 +184,14 @@ something to say.
 ![Opponent-title bubble chart and Cleveland paired dot plot](dashboard/screenshots/opponents.png)
 ![Marimekko mosaic of termination type vs. outcome](dashboard/screenshots/terminations.png)
 
-## A/B-Style Experiments
+## A/B Testing
 
-These games were not randomly assigned to groups, so this is **not** a true
-A/B test — it applies the same statistical toolkit (two-proportion z-test,
-confidence intervals, odds ratio, power analysis) to observational data, and
-says where causal claims stop. Implemented in
+The White-vs-Black comparison is a genuine A/B test: the treatment is piece
+colour, and Lichess assigns it at random. The streak comparison is a
+quasi-experiment, because games were not randomly assigned to groups. Both use
+the standard A/B toolkit (two-proportion z-test, confidence intervals, odds
+ratio, sample-ratio check, A/A test, power analysis) and the write-up says
+where causal claims stop. Implemented in
 [`dashboard/stats.py`](dashboard/stats.py) (standard library + numpy only),
 shown in the dashboard's *Experiments* section and in section 9 of the
 notebook; the underlying counts come from
@@ -209,6 +211,21 @@ notebook; the underlying counts come from
 - **Method checks.** An A/A test (splitting the same games at random) flags a
   difference about 5% of the time, as it should, and the power analysis shows
   ~9,800 games per group are needed to detect a 2-point gap.
+
+## Design Implications
+
+Read as player-behaviour data from a competitive game, each result raises a
+design question and the A/B test that would answer it. These are hypotheses to
+test, not conclusions this dataset can prove:
+
+| Finding | Design question | Test to run |
+|---|---|---|
+| White wins ~5 pp more often, across time controls | Does first-move advantage make matchmaking feel unfair? | Randomize a small compensation for the second player; metric: win-rate gap and games per day; guardrail: overall win rate |
+| The next game is won more often after a win than a loss, even within an opponent-strength band | Is momentum a retention lever, and does a loss need a softer landing? | Randomize next-opponent difficulty after a loss; metric: share of players starting another game within 30 minutes |
+| Games decided on the clock are won far more often than games decided over the board | Is time pressure rewarded skill or created frustration? | Randomize the time increment between equally rated players; metric: share of games ending on time, completion rate |
+
+Each would need a pre-test power analysis like the one above and a
+sample-ratio check after launch.
 
 ## Key Findings
 
@@ -233,6 +250,61 @@ notebook; the underlying counts come from
 > each is marked **[RECONSTRUCTED]** in the notebook with the assumption it
 > makes stated explicitly.
 
+## Data Platform
+
+Besides the analysis, the repo contains a small data-engineering layer that
+rebuilds the same dataset from the Lichess REST API instead of a manual PGN
+export:
+
+```
+Lichess REST API ──► raw.games (DuckDB, JSON payloads)
+                          │  dbt: staging ─► intermediate ─► marts (+ tests)
+                          ▼
+             games · fct_games · dim_opening · dim_date
+                          │  pipeline/export_to_sqlite.py
+                          ▼
+                 SQLite ─► Streamlit dashboard
+```
+
+- **Ingestion** ([`pipeline/ingest.py`](pipeline/ingest.py)): incremental
+  (`since` = newest stored game) and idempotent (upsert by game id), with
+  rate-limit handling. `--backfill` fetches older games, `--from-file` loads a
+  saved export.
+- **dbt** ([`dbt/lichess`](dbt/lichess)): the pandas feature engineering
+  (colour, opponent rating band, opening lookup, sessions via window
+  functions) re-expressed as SQL models, with 25 data tests (uniqueness,
+  not-null, accepted values, referential integrity, a session-logic test) and
+  a source-freshness check. Adapter-specific SQL is isolated in one macro file.
+- **Parity check** ([`pipeline/check_parity.py`](pipeline/check_parity.py)):
+  compares the dbt output with the legacy pandas pipeline column by column. On
+  all 28,838 games the only differences are 2 cells from two games that start
+  in the same second (the PGN export has no sub-second timestamps, the API does).
+- **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): runs
+  ingestion, `dbt build`, the parity check, the export and a headless render of
+  the dashboard on a committed fixture, with no network access.
+- **Orchestration** ([`pipeline/airflow`](pipeline/airflow)): a daily Airflow
+  DAG (`ingest → dbt_build → parity_check → export_to_sqlite`) in a local
+  Docker container.
+
+**What was and was not run.** The pipeline, parity check, dashboard smoke test
+and the Airflow DAG were run locally (all green). Two limits: Lichess now
+requires an API token for game export, so the live-API path is covered by a
+mocked-server test and has not yet pulled the real history, and the CI fixture
+is *synthetic* (converted from the PGN-derived CSV into the API's JSON shape).
+The warehouse is DuckDB, not Snowflake; the models are plain SQL apart from a
+handful of DuckDB functions in `dbt/lichess/macros/adapter_helpers.sql`, and the
+workflow has not been run on GitHub Actions yet.
+
+```bash
+python -m venv .venv-pipeline && source .venv-pipeline/bin/activate   # Windows: .venv-pipeline/Scripts/activate
+pip install -r pipeline/requirements.txt
+export LICHESS_TOKEN=...            # create at lichess.org/account/oauth/token, no scopes
+python pipeline/ingest.py           # or: --from-file pipeline/fixtures/games_sample.ndjson
+cd dbt/lichess && dbt build --profiles-dir . && cd ../..
+python pipeline/check_parity.py
+python pipeline/export_to_sqlite.py # writes sql/lichess_platform.db (does not touch sql/lichess.db)
+```
+
 ## Repository Structure
 
 ```
@@ -254,7 +326,14 @@ dashboard/
   app.py                   Streamlit app
   requirements.txt         lean dependency list for Streamlit Cloud
   screenshots/             local-run screenshots used in this README
+pipeline/
+  ingest.py                Lichess API -> DuckDB raw layer
+  check_parity.py          dbt output vs legacy pandas pipeline
+  export_to_sqlite.py      dbt mart -> SQLite for the dashboard
+  airflow/                 Dockerfile, compose file and the daily DAG
+dbt/lichess/               dbt project (models, seeds, tests)
 .github/workflows/
+  ci.yml                   pipeline CI on a fixture
   keepalive.yml            cron job that pings the live demo to reduce cold starts
 requirements.txt            full environment (notebook + dashboard + ML)
 ```

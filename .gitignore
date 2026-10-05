@@ -3,3 +3,10 @@ __pycache__/
 .venv/
 .ipynb_checkpoints/
 .streamlit/secrets.toml
+
+.venv-pipeline/
+pipeline/warehouse/
+dbt/lichess/target/
+dbt/lichess/logs/
+pipeline/airflow/.env
+sql/lichess_platform.db

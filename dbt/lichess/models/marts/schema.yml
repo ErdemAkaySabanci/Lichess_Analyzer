@@ -1,0 +1,63 @@
+version: 2
+
+models:
+  - name: games
+    description: Wide per-game table with the same columns as the legacy CSV; feeds the Streamlit dashboard.
+    columns:
+      - name: GameId
+        tests: [unique, not_null]
+      - name: Result
+        tests:
+          - accepted_values:
+              arguments: {values: ["1-0", "0-1", "1/2-1/2"]}
+      - name: ResultStatus
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [win, loss, draw]}
+      - name: PlayerColor
+        tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [White, Black]}
+      - name: Termination
+        tests:
+          - accepted_values:
+              arguments: {values: [Normal, Time forfeit, Abandoned, Rules infraction]}
+      - name: Hour
+        tests:
+          - accepted_values:
+              arguments: {values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], quote: false}
+      - name: PrevResult
+        tests:
+          - accepted_values:
+              arguments: {values: [win, loss, draw]}
+
+  - name: fct_games
+    description: Fact table, one row per game.
+    columns:
+      - name: game_id
+        tests: [unique, not_null]
+      - name: played_date
+        tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_day}
+      - name: eco
+        tests:
+          - relationships:
+              arguments: {to: ref('dim_opening'), field: eco}
+      - name: is_win
+        tests:
+          - accepted_values:
+              arguments: {values: [0, 1], quote: false}
+
+  - name: dim_opening
+    columns:
+      - name: eco
+        tests: [unique, not_null]
+
+  - name: dim_date
+    columns:
+      - name: date_day
+        tests: [unique, not_null]
