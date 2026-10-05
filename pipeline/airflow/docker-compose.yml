@@ -1,0 +1,24 @@
+# Single-container Airflow ("standalone": webserver + scheduler, SQLite metadata DB).
+# Meant for running and demonstrating the DAG locally, not for production.
+#
+#   cd pipeline/airflow
+#   cp .env.example .env        # then edit if you have a Lichess token
+#   docker compose up --build   # UI on http://localhost:8080, admin password is printed in the logs
+services:
+  airflow:
+    build:
+      context: ../..
+      dockerfile: pipeline/airflow/Dockerfile
+    command: standalone
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/repo/pipeline/airflow/dags
+      DUCKDB_PATH: /opt/airflow/repo/pipeline/warehouse/lichess.duckdb
+      PIPELINE_PYTHON: /home/airflow/pipeline_venv/bin/python
+      DBT_BIN: /home/airflow/pipeline_venv/bin/dbt
+    volumes:
+      - ../..:/opt/airflow/repo

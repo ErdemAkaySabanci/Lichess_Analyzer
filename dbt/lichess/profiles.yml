@@ -1,0 +1,8 @@
+# Local DuckDB warehouse; no credentials. Override the file with DUCKDB_PATH.
+lichess:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '../../pipeline/warehouse/lichess.duckdb') }}"
+      threads: 4

@@ -88,6 +88,32 @@ to match the shape of its data (see the "On the chart choices" table in
 README.md) — when adding a new chart, pick the form the same way rather than
 defaulting to a bar chart.
 
+## Data platform layer (pipeline/ and dbt/)
+
+A second, newer path builds the same `games` table from the Lichess API:
+`pipeline/ingest.py` → DuckDB `raw.games` → `dbt/lichess` (staging →
+intermediate → marts, 25 tests) → `pipeline/export_to_sqlite.py`. It does
+**not** replace the committed `sql/lichess.db` (the README and dashboard text
+quote its 28,838 games); the export writes `sql/lichess_platform.db` unless
+`--out` says otherwise. `dbt/lichess/models/intermediate/int_games_enriched.sql`
+re-implements `enrich_games` / `add_session_columns`, so a change to a derived
+column must be made in both and verified with `python pipeline/check_parity.py`.
+
+```bash
+.venv-pipeline/Scripts/python pipeline/ingest.py --from-file pipeline/fixtures/games_sample.ndjson
+cd dbt/lichess && dbt build --profiles-dir .      # DUCKDB_PATH overrides the warehouse file
+python pipeline/check_parity.py --strict          # needs the DuckDB built above
+python pipeline/smoke_test_dashboard.py sql/lichess_platform.db
+```
+
+- Lichess game export needs `LICHESS_TOKEN` (anonymous requests return 404).
+- `pipeline/fixtures/games_sample.ndjson` is synthetic (converted from the CSV
+  by `pipeline/make_fixture.py`), not a capture of the live API.
+- `player_name` in `dbt/lichess/dbt_project.yml` is a third copy of the
+  `NICKNAME` that must stay in sync.
+- The Airflow stack (`pipeline/airflow`, `docker compose up --build`) copies
+  `.env.example` to `.env`; `INGEST_MODE=fixture` runs without a token.
+
 ## Data notes
 
 - `data/raw/my_lichess_history.txt` is the raw PGN export (one metadata-tag

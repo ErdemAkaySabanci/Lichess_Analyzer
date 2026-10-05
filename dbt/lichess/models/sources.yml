@@ -1,0 +1,18 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Raw Lichess API payloads, one row per game, written by pipeline/ingest.py.
+    schema: raw
+    tables:
+      - name: games
+        loaded_at_field: fetched_at
+        freshness:
+          warn_after: {count: 3, period: day}
+        columns:
+          - name: id
+            tests: [unique, not_null]
+          - name: created_at
+            tests: [not_null]
+          - name: payload
+            tests: [not_null]
