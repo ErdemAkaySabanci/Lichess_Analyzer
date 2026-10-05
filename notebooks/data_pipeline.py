@@ -26,7 +26,9 @@ RANKED_EVENTS = [
     "Rated classical game",
 ]
 
-ELO_BINS = np.arange(1000, 3200, 200)
+SESSION_GAP_MINUTES = 30
+
+ELO_BINS =np.arange(1000, 3200, 200)
 ELO_LABELS = [f"{ELO_BINS[i]}-{ELO_BINS[i + 1] - 1}" for i in range(len(ELO_BINS) - 1)]
 
 
@@ -125,6 +127,34 @@ def enrich_games(df: pd.DataFrame) -> pd.DataFrame:
     df["OpponentEloRange"] = pd.cut(df["OpponentElo"], bins=ELO_BINS, labels=ELO_LABELS)
 
     df["PlayerColor"] = np.where(df["White"] == NICKNAME, "White", "Black")
+
+    return add_session_columns(df)
+
+
+def add_session_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Adds SessionId, GameInSession and PrevResult (for the tilt analysis).
+
+    A session is a run of games where each starts within SESSION_GAP_MINUTES
+    of the previous game's start (game end times aren't in the export, so the
+    gap is start-to-start). PrevResult is the previous game's ResultStatus
+    within the same session, and is empty for a session's first game, so it
+    never links games played hours apart. The raw export is newest-first, so
+    the frame is reversed before a stable sort to keep ties in play order.
+    """
+    df = df.copy()
+    started = pd.to_datetime(df["UTCDate"] + " " + df["UTCTime"], format="%Y.%m.%d %H:%M:%S", errors="coerce")
+
+    order = started.iloc[::-1].sort_values(kind="stable").index
+    ordered_start = started.loc[order]
+    new_session = ordered_start.diff() > pd.Timedelta(minutes=SESSION_GAP_MINUTES)
+    new_session.iloc[0] = True
+    session_id = new_session.cumsum()
+
+    df["SessionId"] = session_id.reindex(df.index)
+    df["GameInSession"] = session_id.groupby(session_id).cumcount().add(1).reindex(df.index)
+
+    prev_result = df.loc[order, "ResultStatus"].shift(1).where(~new_session)
+    df["PrevResult"] = prev_result.reindex(df.index)
 
     return df
 

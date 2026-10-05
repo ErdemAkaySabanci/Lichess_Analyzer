@@ -12,4 +12,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Request the dashboard so it registers as traffic
-        run: curl -sSf --max-time 30 --retry 3 --retry-delay 10 -o /dev/null https://lichessanalyzer-kunhdct4haer6ezadhndcf.streamlit.app/
+        run: curl -sSf --max-time 30 --retry 3 --retry-delay 10 -o /dev/null https://lichess-data-analytics.streamlit.app/

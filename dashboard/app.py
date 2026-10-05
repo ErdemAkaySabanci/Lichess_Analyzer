@@ -14,14 +14,17 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import queries as q
+import stats
 
 WIN, DRAW, LOSS = "#1a9850", "#bdbdbd", "#d73027"
 WHITE_PIECE, BLACK_PIECE = "#e8eced", "#2d3436"
 MODE_COLORS = {"Bullet": "#4C78A8", "Blitz": "#F58518", "Classical": "#54A24B"}
 CALENDAR_ZMAX = 20
 REPO_URL = "https://github.com/ErdemAkaySabanci/Lichess_Analyzer"
-PLAYER = q.NICKNAME
-PLAYER_LINK = f"[{PLAYER}](https://lichess.org/@/{PLAYER})"
+PLAYER_USERNAME = q.NICKNAME
+PLAYER_FULL_NAME = "Kağan Aydınçelebi"
+PLAYER = "Kağan"
+PLAYER_LINK = f"[{PLAYER_USERNAME}](https://lichess.org/@/{PLAYER_USERNAME})"
 ANALYST = "Erdem Akay"
 
 st.set_page_config(page_title="Lichess Performance Analytics", page_icon="♟️", layout="wide")
@@ -38,7 +41,8 @@ opening_options = q.get_opening_options(conn, min_games=10)
 st.title("♟️ Lichess Performance Analytics")
 st.markdown(
     f"An end-to-end data analysis of **28,838 games** played on [Lichess.org](https://lichess.org) "
-    f"by {PLAYER_LINK}, a friend's account, between {min_date[:4]} and {max_date[:4]}. "
+    f"by **{PLAYER_FULL_NAME}**, a Turkish national chess player, under the account "
+    f"{PLAYER_LINK}, between {min_date[:4]} and {max_date[:4]}. "
     f"The raw PGN export was cleaned in pandas, loaded into SQLite, and every chart below is a "
     f"SQL query rendered with Plotly. Analysis and dashboard by **{ANALYST}** · "
     f"[code on GitHub]({REPO_URL})"
@@ -47,18 +51,18 @@ st.markdown(
 with st.expander("About this analysis — data, pipeline and method"):
     st.markdown(
         f"""
-**Data.** The complete game history of the Lichess account {PLAYER_LINK} (a friend's account),
-exported as PGN: one block of metadata tags per game — players, ratings, titles, time control,
-ECO opening code, result, termination and UTC timestamp.
+**Data.** The complete game history of {PLAYER_FULL_NAME} ({PLAYER_LINK} on Lichess),
+a Turkish national chess player, exported as PGN: one block of metadata tags per game —
+players, ratings, titles, time control, ECO opening code, result, termination and UTC timestamp.
 
 **Pipeline.** Raw PGN → parsed and cleaned with pandas → feature engineering (opponent rating
 and rating band, piece colour, hour of day, ECO code → opening name) → loaded into SQLite →
 parametrized SQL queries (`GROUP BY`, `CASE WHEN`, CTEs, window functions) → Plotly charts.
 
 **Questions this dashboard answers.**
-- How active is the player, and how has that changed over time?
+- How active is {PLAYER}, and how has that changed over time?
 - How does win rate change as opponents get stronger, and does the White-piece advantage hold at every level?
-- Which titled opponents does the player beat, and which not?
+- Which titled opponents does {PLAYER} beat, and which not?
 - Are games won on the clock or over the board?
 - Which openings and which hours of the day produce the best results?
 
@@ -87,7 +91,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        f"Data: Lichess PGN export of {PLAYER} (a friend's account) · "
+        f"Data: Lichess PGN export of {PLAYER_FULL_NAME} ({PLAYER_USERNAME}) · "
         f"Analysis: {ANALYST} · Built with pandas, SQLite, Plotly & Streamlit · "
         f"[Repo]({REPO_URL})"
     )
@@ -409,7 +413,7 @@ if not term_df.empty:
         st.caption(
             f"**Marimekko / mosaic plot — column width is volume, column height is composition.** "
             f"This chart overturned an early hypothesis of this analysis, that time pressure was "
-            f"the player's weakness. Games decided on the clock are a "
+            f"{PLAYER}'s weakness. Games decided on the clock are a "
             f"**{pct(forfeit.iloc[0]['wins_share'])} win rate**, against "
             f"**{pct(normal.iloc[0]['wins_share'])}** when a game is decided over the board: "
             f"the clock is where {PLAYER} wins, and being outplayed is where the losses come from."
@@ -423,7 +427,7 @@ if not term_df.empty:
 st.divider()
 
 # ------------------------------------------------------- what and when ---
-st.header("Openings and timing: what and when does the player win?")
+st.header(f"Openings and timing: what and when does {PLAYER} win?")
 
 opening_df = q.winrate_by_opening(conn, modes, selected_openings, date_from, date_to, top_n=25)
 if opening_df.empty:
@@ -470,6 +474,174 @@ else:
 
 st.divider()
 
+# ------------------------------------------------------------- experiments ---
+st.header("Experiments: is it skill, or could it be chance?")
+st.markdown(
+    "A/B-test tools applied to observational data. Nobody randomly assigned these games, so "
+    "only the colour comparison (Lichess pairs colours at random) comes close to a controlled "
+    "experiment; the streak analysis shows association, not cause."
+)
+
+MIN_ARM = 30  # games per group below which a test is not worth reporting
+MODE_SHORT = {"Rated bullet game": "Bullet", "Rated blitz game": "Blitz", "Rated classical game": "Classical"}
+
+
+def fmt_p(p: float) -> str:
+    return "< 0.001" if p < 0.001 else f"{p:.3f}"
+
+
+# ---- test 1: White vs Black ------------------------------------------------
+st.subheader("Test 1 · White vs Black")
+color_df = q.color_experiment(conn, modes, selected_openings, date_from, date_to)
+
+arms = []
+for label, sub in [(MODE_SHORT.get(m, m), g) for m, g in color_df.groupby("time_control")] + [
+    ("All selected", color_df.groupby("PlayerColor")[["games_played", "wins"]].sum().reset_index())
+]:
+    by_color = sub.set_index("PlayerColor")
+    if {"White", "Black"} <= set(by_color.index) and by_color["games_played"].min() >= MIN_ARM:
+        arms.append((label, stats.two_proportion_test(
+            by_color.loc["White", "wins"], by_color.loc["White", "games_played"],
+            by_color.loc["Black", "wins"], by_color.loc["Black", "games_played"],
+        ), by_color["games_played"].sum(), by_color.loc["White", "games_played"]))
+
+if not arms:
+    st.info(f"Each colour needs at least {MIN_ARM} games in the current filter for this test.")
+else:
+    label, overall, total_n, white_n = arms[-1]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("White minus Black win rate", f"{overall.diff * 100:+.1f} pp")
+    c2.metric("95% confidence interval", f"{overall.ci_low * 100:+.1f} to {overall.ci_high * 100:+.1f} pp")
+    c3.metric("p-value", fmt_p(overall.p_value))
+    c4.metric("Odds ratio", f"{overall.odds_ratio:.2f}",
+              f"{overall.or_ci_low:.2f}–{overall.or_ci_high:.2f}", delta_color="off")
+
+    fig = go.Figure()
+    fig.add_vline(x=0, line_dash="dash", line_color="gray")
+    fig.add_trace(go.Scatter(
+        x=[a[1].diff * 100 for a in arms], y=[a[0] for a in arms], mode="markers",
+        marker=dict(size=13, color=[MODE_COLORS.get(a[0], "#444") for a in arms],
+                    line=dict(color="black", width=1)),
+        error_x=dict(type="data", symmetric=False, thickness=2.5, color="#777",
+                     array=[(a[1].ci_high - a[1].diff) * 100 for a in arms],
+                     arrayminus=[(a[1].diff - a[1].ci_low) * 100 for a in arms]),
+        customdata=np.array([[a[1].n_a, a[1].n_b, a[1].p_value] for a in arms]),
+        hovertemplate="%{y}<br>White − Black: %{x:+.1f} pp<br>"
+                      "%{customdata[0]:,} White vs %{customdata[1]:,} Black games<extra></extra>",
+        showlegend=False,
+    ))
+    fig.update_xaxes(title="White-piece advantage, win-rate difference (percentage points)",
+                     zeroline=False)
+    fig.update_layout(height=120 + 70 * len(arms), margin=dict(t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+
+    srm_p = stats.share_vs_half_pvalue(int(white_n), int(total_n))
+    st.caption(
+        f"**Forest plot: point estimate with 95% interval per time control.** An interval that "
+        f"stays clear of the zero line means the White advantage is unlikely to be chance. "
+        f"Sample-ratio check: {white_n / total_n:.1%} of the {int(total_n):,} games were as White "
+        f"(p = {srm_p:.2f} against a 50/50 split), so colour assignment looks random as expected."
+    )
+
+# ---- test 2: streaks -------------------------------------------------------
+st.subheader("Test 2 · Does the previous result carry over?")
+tilt_df = q.tilt_experiment(conn, modes, selected_openings, date_from, date_to)
+
+tilt_total = tilt_df.groupby("PrevResult").agg(
+    games_played=("games_played", "sum"), wins=("wins", "sum")
+)
+tilt_total["avg_opponent_elo"] = (
+    (tilt_df["avg_opponent_elo"] * tilt_df["games_played"]).groupby(tilt_df["PrevResult"]).sum()
+    / tilt_total["games_played"]
+)
+
+if not {"win", "loss"} <= set(tilt_total.index) or tilt_total.loc[["win", "loss"], "games_played"].min() < MIN_ARM:
+    st.info(f"Streak analysis needs at least {MIN_ARM} games after a win and after a loss.")
+else:
+    crude = stats.two_proportion_test(
+        tilt_total.loc["win", "wins"], tilt_total.loc["win", "games_played"],
+        tilt_total.loc["loss", "wins"], tilt_total.loc["loss", "games_played"],
+    )
+    strata = []
+    for _, band in tilt_df.groupby("elo_band"):
+        b = band.set_index("PrevResult")
+        if {"win", "loss"} <= set(b.index):
+            strata.append((b.loc["win", "wins"], b.loc["win", "games_played"],
+                           b.loc["loss", "wins"], b.loc["loss", "games_played"]))
+    adjusted = stats.stratified_diff(strata)
+
+    t1, t2, t3 = st.columns(3)
+    t1.metric("After a win vs after a loss", f"{crude.diff * 100:+.1f} pp",
+              f"{crude.ci_low * 100:+.1f} to {crude.ci_high * 100:+.1f}", delta_color="off")
+    if adjusted:
+        t2.metric("Same, within opponent-rating bands", f"{adjusted[0] * 100:+.1f} pp",
+                  f"{adjusted[1] * 100:+.1f} to {adjusted[2] * 100:+.1f}", delta_color="off")
+    t3.metric("p-value (raw gap)", fmt_p(crude.p_value))
+
+    order = [r for r in ("loss", "draw", "win") if r in tilt_total.index]
+    rows = tilt_total.loc[order]
+    cis = [stats.wilson_ci(int(r.wins), int(r.games_played)) for r in rows.itertuples()]
+    rates = rows["wins"] / rows["games_played"]
+    fig = go.Figure()
+    fig.add_hline(y=0.5, line_dash="dash", line_color="gray")
+    fig.add_trace(go.Scatter(
+        x=[f"after a {r}" for r in order], y=rates, mode="markers",
+        marker=dict(size=14, color=[LOSS if r == "loss" else DRAW if r == "draw" else WIN for r in order],
+                    line=dict(color="black", width=1)),
+        error_y=dict(type="data", symmetric=False, thickness=2.5, color="#777",
+                     array=[hi - r for (lo, hi), r in zip(cis, rates)],
+                     arrayminus=[r - lo for (lo, hi), r in zip(cis, rates)]),
+        customdata=np.stack([rows["games_played"], rows["avg_opponent_elo"]], axis=-1),
+        hovertemplate="%{x}<br>Win rate %{y:.1%}<br>%{customdata[0]:,} games · "
+                      "avg opponent %{customdata[1]:.0f}<extra></extra>",
+        showlegend=False,
+    ))
+    fig.update_yaxes(tickformat=".0%", title="Win rate (95% interval)")
+    fig.update_layout(height=340, margin=dict(t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+
+    elo_gap = rows.loc["win", "avg_opponent_elo"] - rows.loc["loss", "avg_opponent_elo"] if {"win", "loss"} <= set(rows.index) else 0
+    st.caption(
+        f"**Win rate by the previous game's result, within one session** (games starting less than "
+        f"30 minutes apart; a session's first game is excluded). This is correlation, not tilt or "
+        f"momentum proven: the next opponent is {abs(elo_gap):.0f} rating points "
+        f"{'weaker' if elo_gap < 0 else 'stronger'} after a win than after a loss, which inflates the raw gap, "
+        f"so the second metric compares like with like inside opponent-rating bands. What remains "
+        f"could be form, focus or rating-pool matchmaking; the data can't separate them."
+    )
+
+# ---- method checks ---------------------------------------------------------
+st.subheader("Method checks")
+
+
+@st.cache_data(show_spinner=False)
+def aa_rate(modes_key, openings_key, d_from, d_to):
+    return stats.aa_false_positive_rate(
+        q.win_flags(q.get_connection(), list(modes_key), list(openings_key), d_from, d_to)
+    )
+
+
+wins_n = metrics["total_games"]
+m1, m2, m3 = st.columns(3)
+if wins_n >= 2 * MIN_ARM:
+    m1.metric("A/A test false-positive rate", f"{aa_rate(tuple(modes), tuple(selected_openings), date_from, date_to):.1%}",
+              "target ≈ 5.0%", delta_color="off")
+base = metrics["win_rate"]
+arm_n = max(wins_n // 2, 1)
+m2.metric("Smallest detectable gap", f"{stats.minimum_detectable_diff(arm_n, base) * 100:.1f} pp",
+          f"{arm_n:,} games per group, 80% power", delta_color="off")
+if 0 < base < 1 and base + 0.02 < 1:
+    m3.metric("Games needed to detect 2 pp", f"{stats.required_n_per_group(base, base + 0.02):,}",
+              "per group", delta_color="off")
+st.caption(
+    "**Does the test itself behave?** An A/A test splits the very same games at random into two "
+    "halves and counts how often the z-test wrongly reports a difference; a sound test does so "
+    "about 5% of the time. The other two numbers are the power analysis: how small a gap this much "
+    "data can reliably detect, and how many games per group a 2-point difference would need."
+)
+
+st.divider()
+
 with st.expander("Underlying data tables"):
     st.write("Win rate by time control", mode_df)
     st.write("Win rate by opponent Elo range", elo_df)
@@ -478,10 +650,12 @@ with st.expander("Underlying data tables"):
     st.write("Termination composition", term_df)
     st.write("Top openings", opening_df)
     st.write("Win rate by hour", hour_df)
+    st.write("Colour experiment counts", color_df)
+    st.write("Streak experiment counts", tilt_df)
     st.write("Monthly activity trend", trend_df)
 
 st.caption(
-    f"Raw data: PGN export of {PLAYER}'s Lichess history (a friend's account) · cleaning in pandas · "
+    f"Raw data: PGN export of {PLAYER_FULL_NAME}'s Lichess history ({PLAYER_USERNAME}) · cleaning in pandas · "
     f"analysis layer in SQL over SQLite · charts in Plotly · app in Streamlit · "
     f"analysis by {ANALYST} · [notebook, SQL queries and source]({REPO_URL})"
 )

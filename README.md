@@ -1,9 +1,10 @@
 # Lichess Chess Performance Analytics
 
 An end-to-end data analytics project built on 28,800+ games played on
-[Lichess.org](https://lichess.org) by [legend2014](https://lichess.org/@/legend2014),
-a friend's account, covering the full path from a raw PGN export to a
-deployed interactive dashboard.
+[Lichess.org](https://lichess.org) by **Kağan Aydınçelebi**, a Turkish
+national chess player, under the account
+[legend2014](https://lichess.org/@/legend2014) — covering the full path
+from a raw PGN export to a deployed interactive dashboard.
 The project reimplements and extends an original university report — data
 extraction, cleaning, exploratory analysis, hypothesis testing, and a
 logistic regression model — and adds a SQL analytics layer and a Streamlit +
@@ -12,7 +13,7 @@ Plotly dashboard on top.
 ## Project Overview
 
 The analysis is organized around a set of concrete, testable questions
-about the player's game history:
+about Kağan's game history:
 
 - Does win rate hold up against much higher-rated opponents?
 - Does the White-piece advantage show up in practice, and does it hold at
@@ -27,9 +28,9 @@ about the player's game history:
 
 ## Data Source
 
-The raw data is a PGN (Portable Game Notation) export of the full game
-history of the Lichess account `legend2014`, which belongs to a friend of
-the author — one metadata block plus move list per game. See
+The raw data is a PGN (Portable Game Notation) export of Kağan's full
+Lichess game history (`legend2014`) — one metadata block plus move list
+per game. See
 [`data/raw/my_lichess_history.txt`](data/raw/my_lichess_history.txt).
 
 Fields used by the analysis include `Event` (time control), `White` /
@@ -147,7 +148,7 @@ outcome classes.
 
 ## Interactive Dashboard
 
-**Live demo:** [lichessanalyzer-kunhdct4haer6ezadhndcf.streamlit.app](https://lichessanalyzer-kunhdct4haer6ezadhndcf.streamlit.app/)
+**Live demo:** [lichess-data-analytics.streamlit.app](https://lichess-data-analytics.streamlit.app/)
 _(free-tier hosting — first load after idle can take ~15-20s to wake up; a
 GitHub Actions cron job in [`.github/workflows/keepalive.yml`](.github/workflows/keepalive.yml)
 pings it periodically to reduce this)_
@@ -182,6 +183,32 @@ something to say.
 ![Rating trajectory and opponent-strength heatmap strip](dashboard/screenshots/strength.png)
 ![Opponent-title bubble chart and Cleveland paired dot plot](dashboard/screenshots/opponents.png)
 ![Marimekko mosaic of termination type vs. outcome](dashboard/screenshots/terminations.png)
+
+## A/B-Style Experiments
+
+These games were not randomly assigned to groups, so this is **not** a true
+A/B test — it applies the same statistical toolkit (two-proportion z-test,
+confidence intervals, odds ratio, power analysis) to observational data, and
+says where causal claims stop. Implemented in
+[`dashboard/stats.py`](dashboard/stats.py) (standard library + numpy only),
+shown in the dashboard's *Experiments* section and in section 9 of the
+notebook; the underlying counts come from
+[`06_color_ab_test.sql`](sql/06_color_ab_test.sql) and
+[`07_tilt_effect.sql`](sql/07_tilt_effect.sql).
+
+- **White vs Black** is the closest thing to a controlled experiment, because
+  Lichess pairs colours at random (a sample-ratio check confirms the 50/50
+  split). White wins **+5.1 percentage points** more often (95% CI +3.9 to
+  +6.4, p < 0.001, odds ratio 1.23).
+- **Does the previous result carry over?** Within a session (games less than
+  30 minutes apart), the next game is won **55.1%** of the time after a win
+  and **46.0%** after a loss (+9.0 pp). The next opponent is ~55 rating
+  points weaker after a win, so the comparison is repeated inside
+  opponent-rating bands: **+6.8 pp** (95% CI +5.3 to +8.2). That is an
+  association — the data cannot separate form or focus from matchmaking.
+- **Method checks.** An A/A test (splitting the same games at random) flags a
+  difference about 5% of the time, as it should, and the power analysis shows
+  ~9,800 games per group are needed to detect a 2-point gap.
 
 ## Key Findings
 
@@ -220,8 +247,10 @@ sql/
   build_database.py       loads the processed CSV into SQLite
   lichess.db               generated SQLite database
   01-05_*.sql              five standalone analysis queries
+  06-07_*.sql              counts behind the colour and streak experiments
 dashboard/
   queries.py               parametrized SQL used by the dashboard
+  stats.py                 z-test, confidence intervals, power analysis, A/A test
   app.py                   Streamlit app
   requirements.txt         lean dependency list for Streamlit Cloud
   screenshots/             local-run screenshots used in this README
@@ -282,5 +311,6 @@ Then open the local URL Streamlit prints (defaults to `http://localhost:8501`).
 
 **Erdem Akay** — Computer Science & Engineering, Sabancı University
 
-Analysis, SQL layer and dashboard by Erdem Akay. The game data comes from
-a friend's Lichess account (`legend2014`).
+Analysis, SQL layer and dashboard by Erdem Akay. The game data belongs to
+[Kağan Aydınçelebi](https://lichess.org/@/legend2014), a Turkish national
+chess player, shared with his permission.

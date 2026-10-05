@@ -350,3 +350,58 @@ def activity_trend(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
         ORDER BY month
     """
     return pd.read_sql_query(query, conn, params=params)
+
+
+def color_experiment(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
+    """Games and wins per time control and colour, the input to the White-vs-Black test."""
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT
+            Event AS time_control,
+            PlayerColor,
+            COUNT(*) AS games_played,
+            SUM(CASE WHEN ResultStatus = 'win' THEN 1 ELSE 0 END) AS wins,
+            ROUND(AVG(OpponentElo), 1) AS avg_opponent_elo
+        FROM games
+        WHERE {where}
+        GROUP BY Event, PlayerColor
+        ORDER BY Event, PlayerColor
+    """
+    return pd.read_sql_query(query, conn, params=params)
+
+
+def tilt_experiment(conn, modes, openings, date_from, date_to) -> pd.DataFrame:
+    """Win rate by previous-game result within a session, split by opponent rating band.
+
+    The opponent bands let the dashboard compare like with like: after a win the
+    next opponent is not the same strength as after a loss, so the raw gap is
+    confounded. Callers sum over bands for the crude comparison and use the bands
+    for the adjusted one.
+    """
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT
+            {ELO_BAND_CASE} AS elo_band,
+            MIN(OpponentElo) AS sort_key,
+            PrevResult,
+            COUNT(*) AS games_played,
+            SUM(CASE WHEN ResultStatus = 'win' THEN 1 ELSE 0 END) AS wins,
+            ROUND(AVG(OpponentElo), 1) AS avg_opponent_elo,
+            ROUND(AVG(GameInSession), 1) AS avg_game_in_session
+        FROM games
+        WHERE {where} AND PrevResult IS NOT NULL AND OpponentElo IS NOT NULL
+        GROUP BY elo_band, PrevResult
+        ORDER BY sort_key, PrevResult
+    """
+    return pd.read_sql_query(query, conn, params=params)
+
+
+def win_flags(conn, modes, openings, date_from, date_to):
+    """One 0/1 win flag per game under the current filters (input to the A/A test)."""
+    where, params = _where_clause(modes, openings, date_from, date_to)
+    query = f"""
+        SELECT CASE WHEN ResultStatus = 'win' THEN 1 ELSE 0 END AS win
+        FROM games
+        WHERE {where}
+    """
+    return pd.read_sql_query(query, conn, params=params)["win"].to_numpy()
